@@ -1,29 +1,24 @@
 package ui
 
 import (
-	"bufio"
 	"fmt"
-	"jobber/utils"
-	"log"
-	"os"
 	"os/exec"
-	"path"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/fsnotify/fsnotify"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/go-redis/redis"
 )
 
 type Job struct {
+	key     string
 	cmdline string
 	command *exec.Cmd
 }
 
 type Model struct {
-	jobs    []Job
-	watcher *fsnotify.Watcher
-	pubsub  *redis.PubSub
+	jobs   []Job
+	pubsub *redis.PubSub
 }
 
 func NewModel() Model {
@@ -32,87 +27,28 @@ func NewModel() Model {
 		Password: "",
 		DB:       0,
 	})
-	pubsub := rdb.Subscribe("jobber-new-job")
 
-	watcher, err := fsnotify.NewWatcher()
+	keys, err := rdb.Keys("job-*").Result()
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer watcher.Close()
-
-	xdgDataDir := os.Getenv("XDG_DATA_HOME")
-	jobberDataDir := path.Join(xdgDataDir, "jobber")
-	jobberDataFile := path.Join(jobberDataDir, "data")
-
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				log.Println("event:", event)
-				if event.Has(fsnotify.Write) {
-					lastLine := utils.GetLastLineWithSeek(jobberDataFile)
-					log.Println("Line added: ", lastLine)
-					cmdArgs := strings.Split(lastLine, " ")
-					if len(cmdArgs) < 1 {
-						log.Println("Empty command")
-						return
-					}
-
-					job := exec.Command("bash", "-c", lastLine)
-					job.Dir = "/Users/dolevh/code/personal/github.com/dlvhdr/jobber"
-					stdout, _ := job.StdoutPipe()
-
-					err = job.Start()
-					if err != nil {
-						panic(err)
-					}
-					log.Printf(
-						"Started cmd. pid: %v | path: %v, dir: %v, args: %v",
-						job.Process.Pid,
-						job.Path,
-						job.Dir,
-						strings.Join(job.Args, " "),
-					)
-
-					scanner := bufio.NewScanner(stdout)
-					scanner.Split(bufio.ScanLines)
-					for scanner.Scan() {
-						m := scanner.Text()
-						fmt.Println(m)
-					}
-					job.Wait()
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("error:", err)
-			}
-		}
-	}()
-
-	err = watcher.Add(jobberDataFile)
-	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
-	dataContent, err := os.ReadFile(jobberDataFile)
 	var jobs []Job
-	if err != nil {
-		jobs = []Job{}
-	} else {
-		cmdlines := strings.Split(string(dataContent), "\n")
-		for _, cmdline := range cmdlines {
-			jobs = append(jobs, Job{
-				cmdline: cmdline,
-			})
+	for _, key := range keys {
+		job, err := rdb.Get(key).Result()
+		if err != nil {
+			continue
 		}
+		jobs = append(jobs, Job{
+			key:     key,
+			cmdline: job,
+		})
 	}
 
-	return Model{watcher: watcher, pubsub: pubsub}
+	pubsub := rdb.Subscribe("jobber-new-job")
+	defer pubsub.Close()
+
+	return Model{pubsub: pubsub, jobs: jobs}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -140,9 +76,18 @@ func (m Model) View() string {
 	s.WriteString("JOBBER\n\n")
 
 	s.WriteString("JOBS\n")
-	// s.WriteString(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Align(lipgloss.Left).Render(
-	// 	lipgloss.JoinVertical(lipgloss.Left, m.jobs...),
-	// ))
+
+	var rJobs []string
+	for _, job := range m.jobs {
+		rJobs = append(rJobs, fmt.Sprintf("[%v] %v", job.key, job.cmdline))
+	}
+	s.WriteString(lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		Align(lipgloss.Left).
+		Render(
+			lipgloss.JoinVertical(lipgloss.Left, rJobs...),
+		),
+	)
 
 	return s.String()
 }
