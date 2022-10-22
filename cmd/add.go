@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"jobber/data"
+	"os"
 	"strings"
 	"time"
 
@@ -35,9 +36,15 @@ to quickly create a Cobra application.`,
 		id := fmt.Sprintf("job-%v", time.Now().Unix())
 		job := strings.Join(args, " ")
 
-		err := rdb.Publish("jobber-new-job", data.Job{
+		pwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+
+		err = rdb.Publish("jobber-new-job", data.Job{
 			Id:      id,
 			Cmdline: job,
+			Pwd:     pwd,
 		}).Err()
 		if err != nil {
 			panic(err)

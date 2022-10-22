@@ -6,11 +6,13 @@ require (
 	github.com/charmbracelet/bubbletea v0.22.1
 	github.com/charmbracelet/lipgloss v0.6.0
 	github.com/go-redis/redis v6.15.9+incompatible
+	github.com/kr/pty v1.1.8
 	github.com/spf13/cobra v1.6.0
 )
 
 require (
 	github.com/containerd/console v1.0.3 // indirect
+	github.com/creack/pty v1.1.18 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect

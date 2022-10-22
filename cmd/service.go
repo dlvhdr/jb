@@ -7,11 +7,13 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"jobber/data"
 	"log"
 	"os"
 	"os/exec"
 
+	"github.com/creack/pty"
 	"github.com/go-redis/redis"
 	"github.com/spf13/cobra"
 )
@@ -53,26 +55,45 @@ to quickly create a Cobra application.`,
 			}
 
 			jobCmd := exec.Command(job.Name, job.Args...)
-			stdOutFile, err := os.Create("./out.txt")
+			jobCmd.Dir = job.Pwd
+
+			fmt.Printf("Starting command using pty: %+v\n", job)
+			f, err := pty.Start(jobCmd)
+
 			if err != nil {
 				l.Println(err)
 			}
 
-			stdErrFile, err := os.Create("./err.txt")
-			if err != nil {
-				l.Println(err)
-			}
-
-			jobCmd.Stdout = stdOutFile
-			jobCmd.Stderr = stdErrFile
-			fmt.Printf("Starting command %+v\n", job)
-			err = jobCmd.Start()
-			if err != nil {
-				l.Println(err)
+			var pid int
+			if jobCmd.Process != nil {
+				pid = jobCmd.Process.Pid
 			} else {
-				job.Pid = jobCmd.Process.Pid
-				fmt.Printf("Job %v has pid %v\n", job.Id, job.Pid)
+				pid = 0
 			}
+			tmpOut, err := os.CreateTemp("", fmt.Sprintf("job-%v", pid))
+			if err != nil {
+				l.Println(err)
+				panic(err)
+			}
+
+			go func() {
+				io.Copy(tmpOut, f)
+			}()
+
+			if err != nil {
+				l.Println(err)
+				panic(err)
+			}
+
+			job.Pid = pid
+			job.OutPath = tmpOut.Name()
+
+			err = rdb.Set(job.Id, job, 0).Err()
+			if err != nil {
+				panic(err)
+			}
+
+			fmt.Printf("Job: %+v\n", job)
 		}
 	},
 }
